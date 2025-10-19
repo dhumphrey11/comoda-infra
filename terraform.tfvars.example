@@ -1,0 +1,294 @@
+# Terraform Variables Configuration for Comoda Infrastructure
+# Copy this file to terraform.tfvars and update the values according to your environment
+
+# ================================
+# PROJECT CONFIGURATION
+# ================================
+
+# GCP Project ID - REQUIRED: Replace with your actual project ID
+project_id = "comoda"
+
+# GCP Region - Choose the region closest to your users or where you want to deploy
+region = "us-central1"
+
+# GCP Zone - Must be in the same region as above
+zone = "us-central1-a"
+
+# Environment - Change to "staging" or "prod" for other environments
+environment = "dev"
+
+# ================================
+# CLOUD RUN CONFIGURATION
+# ================================
+
+# Cloud Run service configurations
+# Adjust CPU, memory, and scaling based on your expected load
+cloud_run_services = {
+  backend = {
+    cpu_limit       = "2000m"      # 2 vCPUs
+    memory_limit    = "1Gi"        # 1 GB RAM
+    min_instances   = 1            # Always keep 1 instance warm
+    max_instances   = 20           # Scale up to 20 instances
+    timeout_seconds = 300          # 5 minutes timeout
+    port           = 8080          # Application port
+  }
+  frontend = {
+    cpu_limit       = "1000m"      # 1 vCPU
+    memory_limit    = "512Mi"      # 512 MB RAM
+    min_instances   = 1            # Always keep 1 instance warm
+    max_instances   = 10           # Scale up to 10 instances
+    timeout_seconds = 60           # 1 minute timeout
+    port           = 3000          # React/Next.js default port
+  }
+  ml = {
+    cpu_limit       = "4000m"      # 4 vCPUs for ML workloads
+    memory_limit    = "4Gi"        # 4 GB RAM for ML processing
+    min_instances   = 0            # Scale to zero when not in use
+    max_instances   = 5            # Limit ML instances for cost control
+    timeout_seconds = 900          # 15 minutes timeout for ML jobs
+    port           = 8080          # Application port
+  }
+  backfill = {
+    cpu_limit       = "2000m"      # 2 vCPUs for data processing
+    memory_limit    = "2Gi"        # 2 GB RAM
+    min_instances   = 0            # Scale to zero when not in use
+    max_instances   = 3            # Limit backfill instances
+    timeout_seconds = 3600         # 1 hour timeout for long-running jobs
+    port           = 8080          # Application port
+  }
+}
+
+# ================================
+# STORAGE CONFIGURATION
+# ================================
+
+# Cloud Storage bucket configurations
+storage_buckets = {
+  comoda_data = {
+    location                    = "US"              # Multi-region for high availability
+    storage_class              = "STANDARD"        # Standard storage class
+    versioning_enabled         = true              # Enable object versioning
+    lifecycle_rules_enabled    = true              # Enable automatic cleanup
+    lifecycle_delete_age_days  = 365               # Delete objects after 1 year
+    uniform_bucket_level_access = true             # Use uniform access control
+  }
+  comoda_models = {
+    location                    = "US"              # Multi-region for high availability
+    storage_class              = "STANDARD"        # Standard storage class for frequent access
+    versioning_enabled         = true              # Enable model versioning
+    lifecycle_rules_enabled    = true              # Enable automatic cleanup
+    lifecycle_delete_age_days  = 180               # Delete old models after 6 months
+    uniform_bucket_level_access = true             # Use uniform access control
+  }
+}
+
+# ================================
+# SECRET MANAGER CONFIGURATION
+# ================================
+
+# Secret Manager secrets configuration
+secrets = {
+  database_url = {
+    description = "Database connection string for PostgreSQL/MySQL"
+    labels = {
+      service = "backend"
+      type    = "database"
+    }
+  }
+  api_keys = {
+    description = "External API keys (JSON format: {\"service1\": \"key1\", \"service2\": \"key2\"})"
+    labels = {
+      service = "backend"
+      type    = "api"
+    }
+  }
+  jwt_secret = {
+    description = "JWT signing secret for user authentication"
+    labels = {
+      service = "backend"
+      type    = "auth"
+    }
+  }
+  ml_model_config = {
+    description = "ML model configuration and hyperparameters"
+    labels = {
+      service = "ml"
+      type    = "config"
+    }
+  }
+}
+
+# ================================
+# PUB/SUB CONFIGURATION
+# ================================
+
+# Pub/Sub topics and subscriptions configuration
+pubsub_topics = {
+  data_processing = {
+    description                = "Topic for coordinating data processing jobs"
+    message_retention_duration = "86400s"  # 24 hours
+    subscription_configs = {
+      backend_processor = {
+        ack_deadline_seconds = 60
+        filter              = ""
+      }
+      ml_processor = {
+        ack_deadline_seconds = 300  # 5 minutes for ML processing
+        filter              = "attributes.processor_type=\"ml\""
+      }
+    }
+  }
+  model_training = {
+    description                = "Topic for ML model training coordination"
+    message_retention_duration = "86400s"  # 24 hours
+    subscription_configs = {
+      ml_trainer = {
+        ack_deadline_seconds = 600  # 10 minutes for training
+      }
+    }
+  }
+  notifications = {
+    description                = "Topic for user notifications and alerts"
+    message_retention_duration = "259200s"  # 3 days
+    subscription_configs = {
+      notification_service = {
+        ack_deadline_seconds = 30
+      }
+    }
+  }
+  backfill_jobs = {
+    description                = "Topic for backfill job coordination"
+    message_retention_duration = "86400s"  # 24 hours
+    subscription_configs = {
+      backfill_worker = {
+        ack_deadline_seconds = 1800  # 30 minutes for backfill jobs
+      }
+    }
+  }
+}
+
+# ================================
+# CLOUD SCHEDULER CONFIGURATION
+# ================================
+
+# Cloud Scheduler jobs configuration
+scheduler_jobs = {
+  daily_model_training = {
+    description  = "Daily ML model training at 2 AM UTC"
+    schedule     = "0 2 * * *"  # Cron format: daily at 2 AM UTC
+    time_zone    = "UTC"
+    target_topic = "model_training"
+    payload      = jsonencode({
+      job_type = "daily_training"
+      priority = "normal"
+    })
+    attributes = {
+      source = "scheduler"
+      type   = "training"
+    }
+  }
+  hourly_data_processing = {
+    description  = "Hourly data processing job"
+    schedule     = "0 * * * *"  # Every hour at minute 0
+    time_zone    = "UTC"
+    target_topic = "data_processing"
+    payload      = jsonencode({
+      job_type = "hourly_batch"
+      priority = "high"
+    })
+    attributes = {
+      source = "scheduler"
+      type   = "processing"
+    }
+  }
+  weekly_cleanup = {
+    description  = "Weekly cleanup job on Sundays at 3 AM UTC"
+    schedule     = "0 3 * * 0"  # Weekly on Sunday at 3 AM UTC
+    time_zone    = "UTC"
+    target_topic = "backfill_jobs"
+    payload      = jsonencode({
+      job_type = "cleanup"
+      priority = "low"
+    })
+    attributes = {
+      source = "scheduler"
+      type   = "cleanup"
+    }
+  }
+}
+
+# ================================
+# LABELS AND METADATA
+# ================================
+
+# Common labels for resource organization and billing
+labels = {
+  project     = "comoda"
+  managed_by  = "terraform"
+  team        = "engineering"
+  cost_center = "research-development"
+}
+
+# ================================
+# NETWORKING CONFIGURATION
+# ================================
+
+# VPC connector name (leave empty if not using custom VPC)
+vpc_connector_name = ""
+
+# CIDR blocks allowed to access Cloud Run services
+# For production, restrict this to your actual IP ranges
+allowed_ingress_cidrs = ["0.0.0.0/0"]  # Allow all (change for production)
+
+# ================================
+# EXAMPLE VALUES FOR DIFFERENT ENVIRONMENTS
+# ================================
+
+# Uncomment and modify these sections for different environments:
+
+# # Production Environment Example
+# # environment = "prod"
+# # cloud_run_services = {
+# #   backend = {
+# #     cpu_limit       = "4000m"
+# #     memory_limit    = "2Gi"
+# #     min_instances   = 2
+# #     max_instances   = 50
+# #     timeout_seconds = 300
+# #     port           = 8080
+# #   }
+# #   # ... other services with production scaling
+# # }
+# # storage_buckets = {
+# #   comoda_data = {
+# #     location                    = "US"
+# #     storage_class              = "STANDARD"
+# #     versioning_enabled         = true
+# #     lifecycle_rules_enabled    = true
+# #     lifecycle_delete_age_days  = 2555  # 7 years for production
+# #     uniform_bucket_level_access = true
+# #   }
+# # }
+
+# # Development Environment Example
+# # environment = "dev"
+# # cloud_run_services = {
+# #   backend = {
+# #     cpu_limit       = "1000m"
+# #     memory_limit    = "512Mi"
+# #     min_instances   = 0  # Scale to zero in dev
+# #     max_instances   = 5
+# #     timeout_seconds = 300
+# #     port           = 8080
+# #   }
+# # }
+# # storage_buckets = {
+# #   comoda_data = {
+# #     location                    = "US-CENTRAL1"  # Single region for dev
+# #     storage_class              = "STANDARD"
+# #     versioning_enabled         = false  # Disable versioning in dev
+# #     lifecycle_rules_enabled    = true
+# #     lifecycle_delete_age_days  = 30  # Delete after 30 days in dev
+# #     uniform_bucket_level_access = true
+# #   }
+# # }

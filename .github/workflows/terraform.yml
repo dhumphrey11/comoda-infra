@@ -1,0 +1,99 @@
+name: Terraform
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [ main ]
+    paths:
+      - 'infra/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'infra/**'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/iam
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+
+      - name: Auth to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_TERRAFORM_SA }}
+          token_format: 'access_token'
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Terraform fmt
+        run: terraform fmt -check
+
+      - name: Terraform init
+        run: terraform init
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform plan (IAM)
+        run: terraform plan -out=tfplan -var="project_id=${{ secrets.GCP_PROJECT_ID }}" -var="region=${{ vars.GCP_REGION }}" -var="location=${{ vars.GCP_LOCATION }}"
+
+      - name: Terraform apply (IAM)
+        if: github.ref == 'refs/heads/main'
+        run: terraform apply -auto-approve tfplan
+
+      # Repeat for other stacks (cloud_storage, bigquery, cloud_sql, cloud_run, cloud_scheduler)
+      - name: Plan/apply cloud_storage
+        run: |
+          cd ../cloud_storage
+          terraform init
+          terraform validate
+          terraform plan -out=tfplan -var="project_id=${{ secrets.GCP_PROJECT_ID }}" -var="region=${{ vars.GCP_REGION }}" -var="location=${{ vars.GCP_LOCATION }}"
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then terraform apply -auto-approve tfplan; fi
+
+      - name: Plan/apply bigquery
+        run: |
+          cd ../bigquery
+          terraform init
+          terraform validate
+          terraform plan -out=tfplan -var="project_id=${{ secrets.GCP_PROJECT_ID }}" -var="region=${{ vars.GCP_REGION }}" -var="location=${{ vars.GCP_LOCATION }}"
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then terraform apply -auto-approve tfplan; fi
+
+      - name: Plan/apply cloud_sql
+        run: |
+          cd ../cloud_sql
+          terraform init
+          terraform validate
+          terraform plan -out=tfplan -var="project_id=${{ secrets.GCP_PROJECT_ID }}" -var="region=${{ vars.GCP_REGION }}" -var="location=${{ vars.GCP_LOCATION }}"
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then terraform apply -auto-approve tfplan; fi
+
+      - name: Plan/apply cloud_run
+        run: |
+          cd ../cloud_run
+          terraform init
+          terraform validate
+          terraform plan -out=tfplan -var="project_id=${{ secrets.GCP_PROJECT_ID }}" -var="region=${{ vars.GCP_REGION }}" -var="location=${{ vars.GCP_LOCATION }}" \
+            -var="backend_image=${{ vars.BACKEND_IMAGE }}" -var="ml_image=${{ vars.ML_IMAGE }}" -var="backfill_image=${{ vars.BACKFILL_IMAGE }}"
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then terraform apply -auto-approve tfplan; fi
+
+      - name: Plan/apply cloud_scheduler
+        run: |
+          cd ../cloud_scheduler
+          terraform init
+          terraform validate
+          terraform plan -out=tfplan -var="project_id=${{ secrets.GCP_PROJECT_ID }}" -var="region=${{ vars.GCP_REGION }}" -var="location=${{ vars.GCP_LOCATION }}"
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then terraform apply -auto-approve tfplan; fi

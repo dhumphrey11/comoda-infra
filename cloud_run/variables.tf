@@ -1,0 +1,13 @@
+variable "project_id" { type = string }
+variable "region" { type = string }
+variable "location" { type = string }
+variable "backend_image" { type = string }
+variable "ml_image" { type = string }
+variable "backfill_image" { type = string }
+variable "frontend_image" { type = string }
+variable "backend_sa_email" { type = string }
+variable "ml_sa_email" { type = string }
+variable "backfill_sa_email" { type = string }
+variable "frontend_sa_email" { type = string }
+variable "gcs_model_bucket" { type = string }
+variable "bq_dataset" { type = string }
